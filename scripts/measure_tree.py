@@ -12,11 +12,15 @@ __author__ = "Stefan Duchesne"
 
 if __name__ == "__main__":
 
-    usage = "{0} [options] FilePath.fits".format(os.path.basename(__file__))
+    filename = os.path.basename(__file__)
+
+    usage = "{0} [options] FilePath.fits".format(filename)
 
     parser = ArgumentParser(usage=usage, description="Calculate the flux " \
                             "densities of sources within a FITS file.")
-    parser.add_argument("fitsimage", metavar="", help="")
+    parser.add_argument("fitsimage", metavar="", help="The FITS image. This can " \
+                        "be a filepath to a FITS image or an astropy.io.fits " \
+                        "HDUList object.")
     parser.add_argument("-o", "--outfile", dest="outfile", metavar="", \
                        help="File to write out results to. This creates a new " \
                        "file or overwrites an exisiting one. Default is to not" \
@@ -56,13 +60,18 @@ if __name__ == "__main__":
                        default=False, help="Print additional lines of output " \
                        "while running. Default = False.")
 
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit()
+
     args = parser.parse_args()
+    
     if args.fitsimage is None:
         parser.print_help()
         sys.exit()
 
     logging = fluxtools.logging
-    logging.info(">>> Running {0} {1} {2}.".format(os.path.basename(__file__), \
+    logging.info(">>> Running {0} {1} {2}.".format(filename, \
                                                fluxtools.__version__, \
                                                fluxtools.__date__))
 
@@ -80,3 +89,4 @@ if __name__ == "__main__":
                              args.diagonals, args.LAS, args.annfile, \
                              args.outfile, args.outimage, args.verbose)
 
+    logging.info(">>> {0} is finished.".format(filename))
