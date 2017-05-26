@@ -86,7 +86,7 @@ def pBeam(freq, dish, k=1.22, freq_unit=1.e6, return_unit="arcsec", \
         s, pixel = sBeam(freq, max_b, k, freq_unit, return_unit, precision)
         total_pixels = int(math.floor(p.value / pixel.value))
 
-        print (">>> Total pixels     : {0} pixels".format(total_pixels))
+        print(">>> Total pixels     : {0} pixels".format(total_pixels))
 
         return p, total_pixels
 
