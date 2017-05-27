@@ -455,15 +455,15 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
         if zero_flag: source.append(tree-1)  
         else: source.append(tree)
 
-        wx, wy, bx, by = [], [], [], []
-        for i in range(len(source)):
-            wx.append(source_centroid[i][0])
-            wy.append(source_centroid[i][1])
-            bx.append(source_bcoord[i][0])
-            by.append(source_bcoord[i][1])
+    wx, wy, bx, by = [], [], [], []
+    for i in range(len(source)):
+        wx.append(source_centroid[i][0])
+        wy.append(source_centroid[i][1])
+        bx.append(source_bcoord[i][0])
+        by.append(source_bcoord[i][1])
 
-        world_coords = pix_to_world(wx, wy, warray, naxis)
-        bright_coords = pix_to_world(bx, by, warray, naxis)
+    world_coords = pix_to_world(wx, wy, warray, naxis)
+    bright_coords = pix_to_world(bx, by, warray, naxis)
 
     
     if outfile is not None:
