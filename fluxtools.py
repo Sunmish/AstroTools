@@ -1,6 +1,5 @@
 # TODO: 
 # Add precision options. Currently values are returned at arbitrary precision.
-# Move utility functions to separate file? 
 #
 
 import numpy
@@ -26,7 +25,7 @@ logging.basicConfig(format="%(levelname)s (%(module)s): %(message)s", \
 
 __author__  = "Stefan Duchesne"
 __version__ = "v1.0"
-__date__    = "06-06-2017" 
+__date__    = "07-06-2017" 
 
 
 
@@ -271,8 +270,8 @@ def read_fits(fitsimage):
     return farray, warray, bpp, cd1, cd2, naxis
 
 
-def rms_array(rms, farray):
-    """Generate rms array or 
+def rms_array(rms, farray=None):
+    """Load or generate rms array.
 
     """
 
@@ -284,8 +283,14 @@ def rms_array(rms, farray):
         elif isinstance(rms, fits.HDUList): rarray = rms[0].data
         else: raise ValueError(">>> RMS must be specified as either a single " \
                                "value or as an array/filepath.")
+  
+        
     if rarray is None:
-        rarray = numpy.full_like(farray, rms, dtype=numpy.double)
+        if farray is None:
+            raise ValueError(">>> If RMS array is to be made a template array" \
+                             " must be specified")
+        else:
+            rarray = numpy.full_like(farray, rms, dtype=numpy.double)
 
     if rarray.shape != farray.shape: 
         raise ValueError(">>> RMS array and image array must be the same size.")
@@ -742,12 +747,13 @@ def measure_tree(fitsimage, coords, rms, cutoff1=3, cutoff2=None, max_pix=500, \
     # A forest in which our tree resides:
     source, source_flux, source_dflux, source_avg_flux, source_area, \
         source_npix, world_coords, bright_coords, source_LAS, source_peak = \
-        measure_forest(fitsfile, rms, cutoff1, cutoff2, max_pix, min_pix, \
+        measure_forest(fitsimage, rms, cutoff1, cutoff2, max_pix, min_pix, \
         diagonals, LAS, annfile, outfile, outimage, verbose)
+
 
     # Now to find the tree:
     c = SkyCoord(coords[0], coords[1], unit=(u.deg, u.deg))
-    ww_catalogue = SkyCoord(world_coords, unit=(u.deg, u.deg))
+    ww_catalogue = SkyCoord(world_coords[0], world_coords[1], unit=(u.deg, u.deg))
     i = c.match_to_catalog_sky(ww_catalogue)[0]
 
     dist = angular_distance((coords[0], coords[1]), \
@@ -781,8 +787,9 @@ def measure_tree(fitsimage, coords, rms, cutoff1=3, cutoff2=None, max_pix=500, \
 
 
     return source[i], source_flux[i], source_dflux[i], source_peak[i], \
-        source_avg_flux[i], source_npix[i], world_coords[i], source_LAS[i], \
-        source_area[i], bright_coords[i]   
+        source_avg_flux[i], source_npix[i], (world_coords[0][i], \
+        world_coords[1][i]), source_LAS[i], \
+        source_area[i], (bright_coords[0][i], bright_coords[1][i])   
 
 
 
@@ -875,8 +882,8 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
                    annfile_color="yellow", verbose=True):
     """Measure integrated flux within polygon region. 
 
-    Requires pyregion if using a ds9 region file. Inspired by `radioflux.py` by
-    M.~J. Hardcastle: https://github.com/mhardcastle/radioflux
+    Requires pyregion if using ds9 region file. Inspired by `radioflux.py` by
+    Martin Hardcastle: https://github.com/mhardcastle/radioflux
     
     This adapts a C++ implementation found here:
     http://www.geeksforgeeks.org/how-to-check-if-a-given-point-lies-inside-a-polygon/
@@ -897,7 +904,7 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
                  a list or array, these should be ordered vertices of a polygon
                  in world coordinates of the image.
     r_index      : int, optional
-                 Specifies the index of the polygon if using a ds9.reg or kvis.ann file. 
+                 Specifies the index of the polygon if using a ds9.reg file. 
     sigma        : int, optional
                  Multiple of the RMS required for measurement. Default is 3.
     annfile      : str, optional
@@ -1037,7 +1044,7 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
 
     elif isinstance(region, str):
         raise TypeError(">>> `region` must be one of: DS9.reg, Kvis.ann, or a " \
-                        " list coordinate tuples.")
+                        " list of coordinate tuples.")
 
     else:
         for vertex in region:
@@ -1080,11 +1087,15 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
                 for i in range(len(final_ra)):
                     g.write("DOT W {0} {1}\n".format(final_ra[i], final_dec[i]))
 
-    int_flux = sum(source_flux) / bpp
-    unc_flux = (sum(source_rms) / bpp) * numpy.sqrt(bpp / float(len(source_rms)))
-    avg_rms  = sum(source_rms) / len(source_rms)
-    area     = len(source_flux) * abs(cd1*cd2)
-    npix     = len(source_flux)
+    if len(source_flux) == 0:
+        return 0, 0, 0, 0, 0, 0
+        # raise RuntimeError(">>> No flux above sigma*rms. No measurements done.")
+    else:
+        int_flux = sum(source_flux) / bpp
+        unc_flux = (sum(source_rms) / bpp) * numpy.sqrt(bpp / float(len(source_rms)))
+        avg_rms  = sum(source_rms) / len(source_rms)
+        area     = len(source_flux) * abs(cd1*cd2)
+        npix     = len(source_flux)
 
 
     if verbose:
