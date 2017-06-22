@@ -25,7 +25,7 @@ logging.basicConfig(format="%(levelname)s (%(module)s): %(message)s", \
 
 __author__  = "Stefan Duchesne"
 __version__ = "v1.0"
-__date__    = "07-06-2017" 
+__date__    = "06-06-2017" 
 
 
 
@@ -230,11 +230,11 @@ def read_fits(fitsimage):
     else:
         try:  # Check for NVSS:
             for i in range(len(harray["HISTORY"])):
-                if "'NRAO VLA SKY SURVEY" in harra["HISTORY"][i]:
+                if "'NRAO VLA SKY SURVEY" in harray["HISTORY"][i]:
                     semi_a = 0.5 * 1.2500e-2
                     semi_b = 0.5 * 1.2500e-2
                     beam_not_found = False
-            if beam_not-found: raise KeyError
+            if beam_not_found: raise KeyError
         except KeyError:
             try:  # AIPS has a tell-tale mark:
                 for i in range(len(harray["HISTORY"])):
@@ -254,8 +254,8 @@ def read_fits(fitsimage):
                     for i in range(len(harray["HISTORY"])):
                         if "Sydney University Molonglo Sky Survey (SUMSS)" in \
                             harray["HISTORY"][i]:
-                            decl = math.radians(abs(harray["CRVAL1"]))
-                            beam_area = numpy.pi * (45.0**2 / 3600.0**2) * \
+                            decl = math.radians(abs(harray["CRVAL2"]))
+                            beam_area = 0.25 * numpy.pi * (45.0**2 / 3600.0**2) * \
                                         (1.0 / math.sin(decl))
                             beam_not_found = False
                     if beam_not_found: raise KeyError
@@ -824,7 +824,7 @@ def measure_aperture(fitsimage, coords, radius, rms=None, sigma=3, LAS=True, \
     farray, warray, bpp, cd1, cd2, naxis = read_fits(fitsimage)
     rarray = rms_array(rms, farray)
 
-    r = radius * units[return_unit]
+    r = radius * units[radius_units]
 
     source_flux, source_rms, source_xpixel, source_ypixel, source_coords = \
      [], [], [], [], []
@@ -834,12 +834,12 @@ def measure_aperture(fitsimage, coords, radius, rms=None, sigma=3, LAS=True, \
     for i in range(len(farray[:, 0])):
         for j in range(len(farray[0, :])):
 
-            if farray[i, j] >= cutoff*rarray[i, j]:
+            if farray[i, j] >= sigma*rarray[i, j]:
 
                 c = pix_to_world(i, j, warray, naxis)
                 diff = angular_distance(coords, (c[0], c[1]))
 
-                if diff <= (radius.to(u.degree).value):
+                if diff <= (r.to(u.degree).value):
 
                     source_flux.append(farray[i, j])
                     source_rms.append(rarray[i, j])
