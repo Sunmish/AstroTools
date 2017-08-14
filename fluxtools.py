@@ -1,6 +1,6 @@
-# TODO: 
+# TODO:
 # Add precision options. Currently values are returned at arbitrary precision.
-#
+# Add `strip_extra_axes` function for use when reading in FITS images.
 
 import numpy
 import math
@@ -14,7 +14,7 @@ from astropy.wcs import WCS               # For computing LAS/positions.
 from astropy.coordinates import SkyCoord  # For cross-referencing.
 # SkyCoord or coordinates are returning import errors?
 # This is needed for `measure_tree` - finding a source in a catalogue.
-from astropy import units as u            
+from astropy import units as u
 
 import logging
 logging.basicConfig(format="%(levelname)s (%(module)s): %(message)s", \
@@ -25,7 +25,7 @@ logging.basicConfig(format="%(levelname)s (%(module)s): %(message)s", \
 
 __author__  = "Stefan Duchesne"
 __version__ = "v1.0"
-__date__    = "06-06-2017" 
+__date__    = "14-08-2017"
 
 
 
@@ -91,7 +91,7 @@ def order_boundaries(coords):
         else:
             ord_coord.append((un_x.pop(index), un_y.pop(index)))
 
-    
+
     return ord_coord
 
 
@@ -119,26 +119,28 @@ def kvis_polygon(region, r_index=0):
     f.close()
 
     return coords
- 
+
 
 
 def pix_to_world(x, y, warray, naxis):
     """A wrapper for astropy's all_pix2world.
 
-    This helps with issues where NAXIS > 2. 
+    This helps with issues where NAXIS > 2.
 
     Returns lists if the input pixel coordinates are lists/arrays.
     """
 
-    if (not isinstance(x, list)) or (not isinstance(x, numpy.ndarray)):
-        x, y = [x], [y] 
+
+    if (not isinstance(x, list)) and (not isinstance(x, numpy.ndarray)):
+        x, y = [x], [y]
+
 
     if naxis == 2:
         ra, dec = warray.all_pix2world(y, x, 0)
     elif naxis == 3:
-        ra, dec = warray.all_pix2world(y, x, numpy.ones_like(x), 0)
+        ra, dec, a = warray.all_pix2world(y, x, numpy.ones_like(x), 0)
     elif naxis == 4:
-        ra, dec = warray.all_pix2world(y, x, numpy.ones_like(x), \
+        ra, dec, a, b = warray.all_pix2world(y, x, numpy.ones_like(x), \
                                        numpy.ones_like(x), 0)
     else:
         raise ValueError(">>> NAXIS must be 2, 3, or 4.")
@@ -157,7 +159,7 @@ def world_to_pix(ra, dec, warray, naxis):
     Returns lists if the input pixel coordinates are lists/arrays.
     """
 
-    if (not isinstance(ra, list)) or (not isinstance(ra, numpy.ndarray)):
+    if (not isinstance(ra, list)) and (not isinstance(ra, numpy.ndarray)):
         ra, dec = [ra], [dec]
 
     if naxis == 2:
@@ -173,6 +175,8 @@ def world_to_pix(ra, dec, warray, naxis):
     if len(x) == 1: x, y = x[0], y[0]
 
     return x, y
+
+
 
 
 
@@ -197,11 +201,19 @@ def read_fits(fitsimage):
 
     harray = hdulist[0].header
     farray = hdulist[0].data
+
+    naxis = harray["NAXIS"]
+
+    if ("NAXIS3" in harray.keys()) and naxis == 2:
+        for k in ["NAXIS", "CDELT", "CRVAL", "CTYPE", "CRPIX"]:
+            del harray[k+"3"]
+    if ("NAXIS4" in harray.keys()) and naxis < 4:
+        for k in ["NAXIS", "CDELT", "CRVAL", "CTYPE", "CRPIX"]:
+            del harray[k+"4"]
+
     warray = WCS(harray)
 
     if opened: hdulist.close()
-
-    naxis = harray["NAXIS"]
 
     # Read some things from the FITS header and check some things:
 
@@ -209,7 +221,7 @@ def read_fits(fitsimage):
     except ValueError:  raise ValueError(">>> FITS files must be flat.")
 
     # Try to find pixel sizes:
-    try: 
+    try:
         cd1, cd2 = harray["CDELT1"], harray["CDELT2"]
     except KeyError:
         try:
@@ -250,13 +262,15 @@ def read_fits(fitsimage):
             except (KeyError, IndexError):
                 try:  # Check for SUMSS, which does NOT have the beam information.
                       # We will use the declination-dependent beam size based on
-                      # the reference pixel of the FITS file. 
+                      # the reference pixel of the FITS file.
                     for i in range(len(harray["HISTORY"])):
                         if "Sydney University Molonglo Sky Survey (SUMSS)" in \
                             harray["HISTORY"][i]:
                             decl = math.radians(abs(harray["CRVAL2"]))
-                            beam_area = 0.25 * numpy.pi * (45.0**2 / 3600.0**2) * \
-                                        (1.0 / math.sin(decl))
+                            # beam_area = 0.25 * numpy.pi * (45.0**2 / 3600.0**2) * \
+                            #             (1.0 / math.sin(decl))
+                            semi_a = 0.5 * (45./3600.)
+                            semi_b = 0.5 * (45./(3600. * math.sin(decl)))
                             beam_not_found = False
                     if beam_not_found: raise KeyError
                 except KeyError:
@@ -283,8 +297,8 @@ def rms_array(rms, farray=None):
         elif isinstance(rms, fits.HDUList): rarray = rms[0].data
         else: raise ValueError(">>> RMS must be specified as either a single " \
                                "value or as an array/filepath.")
-  
-        
+
+
     if rarray is None:
         if farray is None:
             raise ValueError(">>> If RMS array is to be made a template array" \
@@ -292,7 +306,7 @@ def rms_array(rms, farray=None):
         else:
             rarray = numpy.full_like(farray, rms, dtype=numpy.double)
 
-    if rarray.shape != farray.shape: 
+    if rarray.shape != farray.shape:
         raise ValueError(">>> RMS array and image array must be the same size.")
 
     return rarray
@@ -407,7 +421,7 @@ def populate_forest(farray, warray, rarray, threshold, max_pix, min_pix, \
     tree_coords = {tree_number: 0}  # its pixel coordinates,
     tree_bounds = {tree_number: 0}  # its boundary coordinates,
     tree_bright = {tree_number: 0}  # Source brightest pixel coordinates.
-    tree_height = {tree_number: 0}  
+    tree_height = {tree_number: 0}
     tree_rms    = {tree_number: 0}  # Sum of rms.
 
     for n in range(0, len(farray[0, :])):
@@ -476,12 +490,12 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
                 File to write annotations to. This creates a new file or over-
                 writes an existing one.
     outfile     : str, optional
-                File to write out results to. This creates a new file or over- 
+                File to write out results to. This creates a new file or over-
                 writes an existing one.
     outimage    : str, optional
-                This allows writing a FITS file with the same header/size as 
-                the input image but with pixels below the detection/growth 
-                thresholds blanked. An exisiting file with this name will 
+                This allows writing a FITS file with the same header/size as
+                the input image but with pixels below the detection/growth
+                thresholds blanked. An exisiting file with this name will
                 be deleted.
     verbose     : bool, optional
                 Select True if wanting to print output to terminal.
@@ -493,7 +507,7 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
     if outfile is not None: start_time = datetime.now()
     # --------------------------------------------------------------------------
     if annfile is not None:
-        if annfile.endswith("ann") or annfile.endswith("reg"): 
+        if annfile.endswith("ann") or annfile.endswith("reg"):
             ann = open(annfile, "w+")
             ann_opened = True
         else:
@@ -511,7 +525,7 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
     farray, warray, bpp, cd1, cd2, naxis = read_fits(fitsimage)
     rarray = rms_array(rms, farray)
 
-    if rarray.shape != farray.shape: 
+    if rarray.shape != farray.shape:
         raise ValueError(">>> RMS array and image array must be the same size.")
 
     farray, forest, tree_leaves, tree_fluxes, tree_coords, tree_bounds,\
@@ -564,7 +578,7 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
             fy.append(tree_coords[tree][i][1] * tree_fluxes[tree][i])
         source_centroid.append((sum(fx) / fz, sum(fy) / fz))
 
-        # The largest angular scale of the source. 
+        # The largest angular scale of the source.
         # This is simply calculated as the largest angular separation between
         # any two pixels that comprise the source.
         if LAS:
@@ -578,7 +592,7 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
                                              tree_bounds[tree][pc2][0], \
                                              warray, naxis)
 
-                    if (ra1 == ra2) and (dec1 == dec2): 
+                    if (ra1 == ra2) and (dec1 == dec2):
                             diff = 0.0
                     else:
                         diff = angular_distance((ra1, dec1), (ra2, dec2))
@@ -607,7 +621,7 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
         # ----------------------------------------------------------------------
 
 
-        if zero_flag: source.append(tree-1)  
+        if zero_flag: source.append(tree-1)
         else: source.append(tree)
 
 
@@ -621,11 +635,11 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
     world_coords = pix_to_world(wx, wy, warray, naxis)
     bright_coords = pix_to_world(bx, by, warray, naxis)
 
-    
+
     if outfile is not None:
 
         if outfile[-3:] == "csv": de = ","
-        else: de = " " 
+        else: de = " "
 
         with open(outfile, "w+") as f:
 
@@ -689,15 +703,20 @@ def measure_forest(fitsimage, rms=None, cutoff1=None, \
         hdulist.writeto(outimage)
         hdulist.close()
 
+    if len(source) == 1:
 
+        world_coords, bright_coords = ([world_coords[0]], [world_coords[1]]), \
+        ([bright_coords[0]], [bright_coords[1]])
 
     return source, source_flux, source_dflux, source_avg_flux, source_area, \
         source_npix, world_coords, bright_coords, source_LAS, source_peak
 
 
 
+
 def measure_tree(fitsimage, coords, rms, cutoff1=3, cutoff2=None, max_pix=500, \
-                 min_pix=2, diagonals=True, LAS=True, annfile=None, outfile=None, \
+                 min_pix=2, max_sep=1.0, diagonals=True, LAS=True, annfile=None, \
+                 outfile=None, \
                  outimage=None, verbose=False):
     """Calculate the fluxes of an individual.
 
@@ -732,12 +751,12 @@ def measure_tree(fitsimage, coords, rms, cutoff1=3, cutoff2=None, max_pix=500, \
                 File to write annotations to. This creates a new file or over-
                 writes an existing one.
     outfile     : str, optional
-                File to write out results to. This creates a new file or over- 
+                File to write out results to. This creates a new file or over-
                 writes an existing one.
     outimage    : str, optional
-                This allows writing a FITS file with the same header/size as 
-                the input image but with pixels below the detection/growth 
-                thresholds blanked. An exisiting file with this name will 
+                This allows writing a FITS file with the same header/size as
+                the input image but with pixels below the detection/growth
+                thresholds blanked. An exisiting file with this name will
                 be deleted.
     verbose     : bool, optional
                 Select True if wanting to print output to terminal.
@@ -754,10 +773,21 @@ def measure_tree(fitsimage, coords, rms, cutoff1=3, cutoff2=None, max_pix=500, \
     # Now to find the tree:
     c = SkyCoord(coords[0], coords[1], unit=(u.deg, u.deg))
     ww_catalogue = SkyCoord(world_coords[0], world_coords[1], unit=(u.deg, u.deg))
-    i = c.match_to_catalog_sky(ww_catalogue)[0]
+
+    if len(source) != 1:
+
+        i = c.match_to_catalog_sky(ww_catalogue)[0]
+
+    else:
+
+        i = 0
 
     dist = angular_distance((coords[0], coords[1]), \
                             (world_coords[0][i], world_coords[1][i]))
+
+
+    if dist > max_sep:
+        raise RuntimeError("No sources found within `max_sep`.")
 
     if verbose:
         if dist < 1.0:
@@ -789,12 +819,12 @@ def measure_tree(fitsimage, coords, rms, cutoff1=3, cutoff2=None, max_pix=500, \
     return source[i], source_flux[i], source_dflux[i], source_peak[i], \
         source_avg_flux[i], source_npix[i], (world_coords[0][i], \
         world_coords[1][i]), source_LAS[i], \
-        source_area[i], (bright_coords[0][i], bright_coords[1][i])   
+        source_area[i], (bright_coords[0][i], bright_coords[1][i])
 
 
-
+#
 def measure_aperture(fitsimage, coords, radius, rms=None, sigma=3, LAS=True, \
-                     verbose=True, radius_units="deg"):
+                     verbose=True, radius_units="deg", z=0):
     """Measure flux within a circular aperture.
 
     Parameters
@@ -824,29 +854,33 @@ def measure_aperture(fitsimage, coords, radius, rms=None, sigma=3, LAS=True, \
     farray, warray, bpp, cd1, cd2, naxis = read_fits(fitsimage)
     rarray = rms_array(rms, farray)
 
+    ndim  = fits.getval("NAXIS")
+    if ndim < 3:
+        farray = numpy.expand_dims(farray, axis=0)
+
     r = radius * units[radius_units]
 
     source_flux, source_rms, source_xpixel, source_ypixel, source_coords = \
      [], [], [], [], []
     source_peak = 0
 
+    for i in range(len(farray[z, :, 0])):
+        for j in range(len(farray[z, 0, :])):
 
-    for i in range(len(farray[:, 0])):
-        for j in range(len(farray[0, :])):
-
-            if farray[i, j] >= sigma*rarray[i, j]:
+            if farray[z, i, j] >= sigma*rarray[i, j]:
 
                 c = pix_to_world(i, j, warray, naxis)
                 diff = angular_distance(coords, (c[0], c[1]))
 
                 if diff <= (r.to(u.degree).value):
 
-                    source_flux.append(farray[i, j])
+                    source_flux.append(farray[z, i, j])
                     source_rms.append(rarray[i, j])
                     source_xpixel.append(i)
                     source_ypixel.append(j)
                     source_coords.append(c)
-                    if farray[i, j] > source_peak: source_peak = farray[i, j]
+                    if farray[z, i, j] > source_peak:
+                        source_peak = farray[z, i, j]
 
     int_flux = sum(source_flux) / bpp
     unc_flux = (sum(source_rms) / bpp) * numpy.sqrt(bpp / float(len(source_rms)))
@@ -873,18 +907,18 @@ def measure_aperture(fitsimage, coords, radius, rms=None, sigma=3, LAS=True, \
               int_flux, unc_flux, source_peak, npix, las, area))
 
 
-    return int_flux, unc_flux, source_peak, npix, las, area 
+    return int_flux, unc_flux, source_peak, npix, las, area
 
 
 
 
 def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
                    annfile_color="yellow", verbose=True):
-    """Measure integrated flux within polygon region. 
+    """Measure integrated flux within polygon region.
 
     Requires pyregion if using ds9 region file. Inspired by `radioflux.py` by
     Martin Hardcastle: https://github.com/mhardcastle/radioflux
-    
+
     This adapts a C++ implementation found here:
     http://www.geeksforgeeks.org/how-to-check-if-a-given-point-lies-inside-a-polygon/
 
@@ -904,12 +938,12 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
                  a list or array, these should be ordered vertices of a polygon
                  in world coordinates of the image.
     r_index      : int, optional
-                 Specifies the index of the polygon if using a ds9.reg file. 
+                 Specifies the index of the polygon if using a ds9.reg file.
     sigma        : int, optional
                  Multiple of the RMS required for measurement. Default is 3.
     annfile      : str, optional
                  File to write annotations to. This creates a new file or over-
-                 writes an existing one. The annotations here are just dots 
+                 writes an existing one. The annotations here are just dots
                  indicating each pixel that is measured.
     annfile_color: str, optional
                  Color of the annotations. Default is `yellow`.
@@ -926,15 +960,15 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
         """Check if (x, y) is in region.
 
         (x, y) is considered in region if the followed is met:
-        A line drawn horizontally to the right from (x, y) intersects 
-        with an odd number of region edges. 
-        """  
-        
+        A line drawn horizontally to the right from (x, y) intersects
+        with an odd number of region edges.
+        """
 
-            
+
+
         def orientation(p1, p2, p3):
-            """Get orientation of ordered triplet. 
-            
+            """Get orientation of ordered triplet.
+
             0 == collinear
             1 == clockwise
             2 == counter-clockwise
@@ -991,9 +1025,9 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
                 inter = True
 
 
-            return inter 
+            return inter
 
-    
+
         coords_in_region = []
 
         for i in range(len(x)):
@@ -1023,29 +1057,30 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
         return coords_in_region
 
 
-    # 
+    #
     ra, dec = [], []
 
-    if region.endswith(".reg"):
+    if isinstance(region, str):
 
-        import pyregion
-        
-        r = pyregion.open(region)[r_index].coord_list
-        
-        for i in range(0, len(r), 2):
-            ra.append(r[i])
-            dec.append(r[i+1])
+        if region.endswith(".reg"):
 
-    elif region.endswith(".ann"):
-        
-        poly_coords = kvis_polygon(region)
-        ra  = [coord[0] for coord in poly_coords]
-        dec = [coord[1] for coord in poly_coords]
+            import pyregion
 
-    elif isinstance(region, str):
-        raise TypeError(">>> `region` must be one of: DS9.reg, Kvis.ann, or a " \
-                        " list of coordinate tuples.")
+            r = pyregion.open(region)[r_index].coord_list
 
+            for i in range(0, len(r), 2):
+                ra.append(r[i])
+                dec.append(r[i+1])
+
+        elif region.endswith(".ann"):
+
+            poly_coords = kvis_polygon(region)
+            ra  = [coord[0] for coord in poly_coords]
+            dec = [coord[1] for coord in poly_coords]
+
+        else:
+            raise TypeError(">>> `region` must be one of: DS9.reg, Kvis.ann, or a " \
+                            " list of coordinate tuples.")
     else:
         for vertex in region:
             ra.append(vertex[0])
@@ -1083,11 +1118,12 @@ def measure_region(fitsimage, rms, region, r_index=0, sigma=3, annfile=None, \
     if annfile is not None:
         if annfile.endswith(".ann"):
             with open(annfile, "w+") as g:
-                g.write("colour {0}".format(annfile_color))
+                g.write("colour {0}\n".format(annfile_color))
                 for i in range(len(final_ra)):
                     g.write("DOT W {0} {1}\n".format(final_ra[i], final_dec[i]))
 
     if len(source_flux) == 0:
+        print("Not flux above sigma*rms. No measurements done.")
         return 0, 0, 0, 0, 0, 0
         # raise RuntimeError(">>> No flux above sigma*rms. No measurements done.")
     else:
